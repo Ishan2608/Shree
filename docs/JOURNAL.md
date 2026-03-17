@@ -1,0 +1,62 @@
+# Day 1
+
+## Project Directory Setup
+
+### Update `pip` version.
+> python.exe -m pip install --upgrade pip  
+
+### Setup virtual environment using python
+Setup a virtual environment to maintain a separate package of dependencies, for this folder specifically to maintain consistency of version of packages, regardless of what happens in other parts of the PC.
+Command:
+> python -m venv <IDENTIFIER_FOR_THIS_VIRTUAL_ENV>
+> python -m venv venv
+
+- `-m` tells PC to user built in python venv module.
+- To create requirements.txt file: `pip freeze > requirements.txt`
+
+## Understand Pydantic
+
+### Type Enforcing.
+Python library for data parsing and type validation. Useful to enforce a predefined data structure/format between functions, and frontend and backend.
+- **BaseModel:** The fundamental class of Pydantic. Inheriting from it transforms a standard Python class into a strictly validated data schema.
+- **Field(..., description="..."):** The Field function applies additional constraints and metadata to an attribute. The ellipsis (...) as the first argument is a Python syntax convention used by Pydantic to explicitly declare that the field is required and has no default value. The description parameter is utilized by frameworks like FastAPI to automatically generate interactive API documentation (Swagger UI).
+- **Optional:** Imported from Python's typing module, it indicates that a field can either hold its specified type or be None.
+- **Any:** Indicates that a value can be of any data type without failing validation. dict[str, Any] means a dictionary where the keys are strings, but the values can be anything (integers, strings, lists, etc.).
+
+### Project Settings
+Pydantic provides BaseSettings class to build our custom class, that reads environment variables and .env file and initialize the environment variables for the project without us having to do it manually anywhere in the project. Just inherit from class, define variables like this:
+> KEY_NAME_IN_ENV: TYPE
+
+Inside the class, you define another class with name -> `Config` to clearly define from where to get the data. Without this, Pydantic only reads form system's environment variables. To read from your specific .env file named `.env`:
+> env_file = ".env"
+
+In the file defining this code, just instantiate the class, by creating a object from it. Other files simply import this object.
+
+## Conversation Session Storage
+
+In development mode, we maintain an in-memory session, i.e., in RAM. Data is lost when program stops running.
+
+> `defaultdict` is a subclass of Python's built-in dict class, located in the standard collections module. It overrides the `__missing__(key)` method to automatically provide a default value for a nonexistent key, completely eliminating standard KeyError exceptions during key access.
+> When you instantiate a defaultdict, you pass it a callable argument known as the default_factory (such as list, int, or a custom lambda function). If you attempt to access a key that does not currently exist in the dictionary, it executes the default_factory to generate a base value, maps that new value to the missing key, and returns it.
+
+```
+{
+    "session_id": {
+        "history": [
+            {
+              "role": "user" | "assistant" | "system",
+              "content": str
+            },
+        ],
+        "files": [
+            { 
+              "file_id": str, 
+              "filepath": str, 
+              "filename":str 
+            },
+        ]
+    }
+}
+```
+
+

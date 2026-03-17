@@ -1,0 +1,18 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# Project specific storage
+uploads/
+saved_models/
+
+# System files
+.DS_Store
+Thumbs.db
