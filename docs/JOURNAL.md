@@ -59,4 +59,16 @@ In development mode, we maintain an in-memory session, i.e., in RAM. Data is los
 }
 ```
 
+# Day 2
 
+## Getting List of Securities on Indian Stock Market.
+1. Get the list of all companies listed on **BSE** using the following link: [BSE_SITE](https://www.bseindia.com/corporates/List_Scrips.html)
+    - Select `Segment = Equity T+1` and `Status = Active`
+2. Get the list of all companies listed on **NSE** using the following link: [NSE_SITE](https://www.nseindia.com/static/market-data/securities-available-for-trading)
+    - Select the First file: `Securities available for Equity segment (.csv)`
+
+## Cleaning And Merging the Lists.
+- Each company has a ISIN number, which uniquely identifies it in the world. Both downloaded CSV files have this.
+- Both had different columns names for same columns. E.g., In NSE List = Symbol, and in BSE List = Security Id. Had to rename names for consistency.
+- BSE List (CSV file) was terrible. Extra leading commas at the end of each row confused pandas. It had to be significantly cleaned.
+- A merged CSV file was created using the JOIN on the ISIN column.

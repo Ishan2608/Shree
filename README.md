@@ -1,4 +1,4 @@
-# Shree_v2
+# Shree_v2 (Work in Progress)
 
 Shree_v2 is an AI financial analyst assistant tailored for Indian retail investors.
 
