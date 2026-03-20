@@ -21,7 +21,7 @@ def sanitize_dataframe(df: pd.DataFrame) -> dict[str, list]:
     Example: {"Date": ["2024-01-01", ...], "Close": [1234.5, None, 1238.0, ...]}
   """
   # turn index, usually Date into regular column. Usually the Date Column.
-  df.reset_index()
+  df = df.reset_index()
   # convert all column names to string because some yfinance financials have Timestamp columns names
   df.columns = [str(c) for c in df.columns]
 

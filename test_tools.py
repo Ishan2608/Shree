@@ -20,7 +20,7 @@ def _line(char="-"):
 def _header(title: str):
     print("\n" + "=" * W)
     print(f" {title} ".center(W, "="))
-    print("=" * W)
+    _line()
 
 def _section(title: str):
     print(f"\n [ {title} ]")
@@ -315,7 +315,7 @@ def test_forecasting():
 # --- RUNNER ---
 
 if __name__ == "__main__":
-    _header("Shree_v2 - Tool Test Suite")
+    _header("Shree - Tool Test Suite")
 
     test_functions = [
         test_session_store,
@@ -342,6 +342,6 @@ if __name__ == "__main__":
             print(f"\n  [ERROR] {test_fn.__name__}: {type(e).__name__}: {e}")
             failed += 1
 
-    print("\n" + "=" * W)
-    print(f" Results: {passed} tests completed | {failed} failed")
-    print("=" * W)
+    _line("=")
+    print(f"Results: {passed} tests completed | {failed} failed")
+    _line("=")
