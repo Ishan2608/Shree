@@ -40,7 +40,7 @@ from agent import run_agent
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Shree_v2 Backend",
+    title="Shree Backend",
     description=(
         "AI Financial Analyst Agent API for Indian retail investors. "
         "Powered by Google ADK + Gemini 2.0 Flash."

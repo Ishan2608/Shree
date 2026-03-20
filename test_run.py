@@ -1,26 +1,28 @@
 """
-test_run.py — Terminal Chat Client for Shree_v2
+test_run.py — Terminal Chat Client for Shree / Shree
 
 A menu-driven terminal interface that talks directly to the agent (via run_agent())
-without needing the FastAPI server or any frontend.
+without needing the FastAPI server or any frontend.  Gives the same experience
+as the production chat — tool calls, chart data summaries, document uploads —
+all from the command line.
 
 Features
 --------
   - Full multi-turn conversation with the agent
-  - File upload via typed path OR a small Tkinter file-picker dialog
+  - File upload via typed path OR a Tkinter file-picker dialog
   - Text context injection (paste raw text into the session)
   - View uploaded files in the current session
   - Clear/reset session
   - Coloured output so agent replies are easy to read
-  - Data block summary: when the agent returns chart data, the key fields are
+  - Data block summary: when the agent returns chart data, key fields are
     printed in a compact table so you can verify the structure
 
 Usage
 -----
     python test_run.py
 
-No server needed. Calls run_agent() and session_store directly.
-Requires .env to be present with valid GEMINI_API_KEY.
+No server needed. Calls run_agent() and session_store utilities directly.
+Requires .env to be present with a valid GEMINI_API_KEY.
 
 Menu Commands (type at the prompt)
 -----------------------------------
@@ -43,7 +45,7 @@ import uuid
 import json
 from datetime import datetime
 
-# ── Optional colour support (works on most terminals; gracefully degrades) ───
+# ── Optional colour support ───────────────────────────────────────────────────
 try:
     from colorama import init as colorama_init, Fore, Style
     colorama_init(autoreset=True)
@@ -51,25 +53,22 @@ try:
 except ImportError:
     _HAS_COLOR = False
 
-    class Fore:      # noqa: F811  — stub when colorama absent
+    class Fore:      # stub when colorama absent
         CYAN = GREEN = YELLOW = RED = MAGENTA = BLUE = WHITE = ""
 
-    class Style:     # noqa: F811
+    class Style:
         BRIGHT = RESET_ALL = DIM = ""
 
 
-# ── Tkinter file picker (optional — falls back to path input if unavailable) ─
+# ── Tkinter file picker (optional) ───────────────────────────────────────────
 def _pick_file_tkinter() -> str | None:
-    """
-    Open a small Tkinter file dialog. Returns the selected filepath or None
-    if the user cancelled or Tkinter is unavailable.
-    """
+    """Open a Tkinter file dialog. Returns the selected path or None."""
     try:
         import tkinter as tk
         from tkinter import filedialog
 
         root = tk.Tk()
-        root.withdraw()          # Hide the empty root window
+        root.withdraw()
         root.attributes("-topmost", True)
         filepath = filedialog.askopenfilename(
             title="Select a file to upload to Shree",
@@ -92,29 +91,27 @@ def _pick_file_tkinter() -> str | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lazy imports — these pull in the project modules.
-# Done here (not at top-level) so we get a clean error message if the user
-# forgot to activate their venv or set up .env.
+# Lazy imports — pulled in after colour stubs are set up so error messages
+# look nice even when colorama is absent.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _import_project() -> tuple:
     """
-    Import project modules and return (run_agent, session_store funcs, settings).
-    Prints a friendly error and exits if something is missing.
+    Import project modules and return them as a tuple.
+    Prints a friendly error and exits on failure.
     """
     try:
-        from agent import run_agent  # noqa
+        from agent import run_agent
         from utils.session_store import (
             append_message, get_history, add_file,
             get_files, clear_session,
         )
-        from utils.doc_parser import parse_uploaded_file
         from config import settings
-        return run_agent, append_message, get_history, add_file, get_files, clear_session, parse_uploaded_file, settings
+        return run_agent, append_message, get_history, add_file, get_files, clear_session, settings
     except ImportError as e:
         print(f"\n{Fore.RED}Import error: {e}")
         print(f"{Fore.YELLOW}Make sure you are running from the project root with your venv active.")
-        print(f"{Fore.YELLOW}Also check that your .env file exists with GEMINI_API_KEY set.\n")
+        print(f"{Fore.YELLOW}Also check that .env exists with GEMINI_API_KEY set.\n")
         sys.exit(1)
     except Exception as e:
         print(f"\n{Fore.RED}Startup error: {e}\n")
@@ -127,8 +124,8 @@ def _import_project() -> tuple:
 
 BANNER = r"""
 ╔══════════════════════════════════════════════════════════╗
-║      ⣿  S H R E E  —  AI Financial Analyst  ⣿            ║
-║          Terminal Chat Client    v1.0                    ║
+║      ⣿  A R T H A  —  AI Financial Analyst  ⣿           ║
+║             Terminal Chat Client  v2.0                   ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -162,18 +159,30 @@ def _print_separator():
     print(f"{Fore.WHITE}{Style.DIM}{'─' * 60}{Style.RESET_ALL}")
 
 
+def _print_status(msg: str):
+    print(f"  {Fore.CYAN}{msg}{Style.RESET_ALL}")
+
+
+def _print_success(msg: str):
+    print(f"  {Fore.GREEN}✔ {msg}{Style.RESET_ALL}")
+
+
+def _print_error(msg: str):
+    print(f"  {Fore.RED}✖ {msg}{Style.RESET_ALL}\n")
+
+
 def _print_agent_reply(text: str, data: dict | None):
     """Pretty-print the agent's text reply and summarise the data block if present."""
     _print_separator()
     print(f"{Fore.GREEN}{Style.BRIGHT}Shree:{Style.RESET_ALL}")
-    # Indent each line for visual separation
     for line in text.split("\n"):
         print(f"  {line}")
 
     if data:
         _print_separator()
-        print(f"{Fore.MAGENTA}{Style.BRIGHT}📊 Data Block — {data.get('chart_type', 'unknown').upper()}{Style.RESET_ALL}")
-        chart_type = data.get("chart_type", "")
+        chart_type = data.get("chart_type", "unknown")
+        print(f"{Fore.MAGENTA}{Style.BRIGHT}📊 Data Block — {chart_type.upper()}{Style.RESET_ALL}")
+
         if chart_type == "candlestick":
             dates = data.get("dates", [])
             closes = data.get("close", [])
@@ -184,6 +193,7 @@ def _print_agent_reply(text: str, data: dict | None):
                 print(f"  Range   : {dates[0]}  →  {dates[-1]}")
             if closes:
                 print(f"  Close   : first={closes[0]}  last={closes[-1]}")
+
         elif chart_type == "forecast":
             print(f"  Symbol   : {data.get('symbol', 'n/a')}")
             print(f"  Horizon  : {data.get('horizon_days', 'n/a')} days")
@@ -196,31 +206,24 @@ def _print_agent_reply(text: str, data: dict | None):
             note = data.get("note", "")
             if note:
                 print(f"\n  {Fore.YELLOW}⚠ {note[:120]}{'...' if len(note) > 120 else ''}{Style.RESET_ALL}")
+
         elif chart_type in ("line", "bar"):
             vals = data.get("values", [])
-            print(f"  Label : {data.get('label', 'n/a')}")
-            print(f"  Points: {len(vals)}")
+            print(f"  Label  : {data.get('label', 'n/a')}")
+            print(f"  Points : {len(vals)}")
+
         elif chart_type == "table":
             rows = data.get("rows", [])
             cols = data.get("columns", [])
             print(f"  Columns : {len(cols)}  |  Rows: {len(rows)}")
+
         else:
-            # Unknown chart type — just dump the top-level keys
-            keys = [k for k in data.keys() if k != "chart_type"]
-            print(f"  Keys : {', '.join(keys[:10])}")
-    _print_separator()
+            # Fallback: dump the top-level keys and their types
+            for k, v in data.items():
+                val_repr = f"[{len(v)} items]" if isinstance(v, list) else repr(v)[:60]
+                print(f"  {k}: {val_repr}")
 
-
-def _print_status(msg: str):
-    print(f"{Fore.YELLOW}  ▸ {msg}{Style.RESET_ALL}")
-
-
-def _print_error(msg: str):
-    print(f"{Fore.RED}  ✖ {msg}{Style.RESET_ALL}")
-
-
-def _print_success(msg: str):
-    print(f"{Fore.GREEN}  ✔ {msg}{Style.RESET_ALL}")
+    print()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,19 +231,14 @@ def _print_success(msg: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def cmd_upload(session_id: str, add_file_fn, settings) -> None:
-    """
-    Handle /upload command.
-    Offers Tkinter file picker first; falls back to manual path entry.
-    Copies the file into the uploads/ directory and registers it in the session.
-    """
-    print(f"\n{Fore.CYAN}Upload a file{Style.RESET_ALL}")
+    """Handle /upload — copy a file into the uploads directory and register it."""
+    print(f"\n{Fore.CYAN}How would you like to select the file?{Style.RESET_ALL}")
     print("  [1] Open file picker (Tkinter)")
-    print("  [2] Type file path manually")
-    print("  [0] Cancel")
-    choice = input(f"\n{Fore.WHITE}  Choice: {Style.RESET_ALL}").strip()
+    print("  [2] Type the file path manually")
+    print("  [3] Cancel")
+    choice = input(f"  {Fore.WHITE}Choice (1/2/3): {Style.RESET_ALL}").strip()
 
     filepath = None
-
     if choice == "1":
         _print_status("Opening file picker…")
         filepath = _pick_file_tkinter()
@@ -263,7 +261,6 @@ def cmd_upload(session_id: str, add_file_fn, settings) -> None:
         _print_error(f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(allowed))}")
         return
 
-    # Copy into uploads/ directory
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     file_id  = str(uuid.uuid4())
     filename = os.path.basename(filepath)
@@ -277,13 +274,10 @@ def cmd_upload(session_id: str, add_file_fn, settings) -> None:
 
 
 def cmd_context(session_id: str, append_message_fn) -> None:
-    """
-    Handle /context command.
-    Reads multi-line input until the user types END on its own line.
-    Stores it as a system message in the session.
-    """
+    """Handle /context — inject multi-line raw text into the session."""
     print(f"\n{Fore.CYAN}Paste your context below.{Style.RESET_ALL}")
-    print(f"  Type {Fore.YELLOW}END{Style.RESET_ALL} on its own line when done. Type {Fore.YELLOW}CANCEL{Style.RESET_ALL} to abort.\n")
+    print(f"  Type {Fore.YELLOW}END{Style.RESET_ALL} on its own line when done. "
+          f"Type {Fore.YELLOW}CANCEL{Style.RESET_ALL} to abort.\n")
 
     lines = []
     while True:
@@ -303,13 +297,13 @@ def cmd_context(session_id: str, append_message_fn) -> None:
         return
 
     context_text = "\n".join(lines)
-    content = f"[User-provided context]:\n{context_text}"
-    append_message_fn(session_id, "system", content)
-    _print_success(f"Context added ({len(context_text)} characters). The agent will consider it on the next message.\n")
+    append_message_fn(session_id, "system", f"[User-provided context]:\n{context_text}")
+    _print_success(f"Context added ({len(context_text)} characters). "
+                   "The agent will consider it on the next message.\n")
 
 
 def cmd_files(session_id: str, get_files_fn) -> None:
-    """Handle /files command — list files uploaded in this session."""
+    """Handle /files — list files uploaded in this session."""
     files = get_files_fn(session_id)
     if not files:
         _print_status("No files uploaded in this session yet.")
@@ -317,14 +311,16 @@ def cmd_files(session_id: str, get_files_fn) -> None:
     print(f"\n{Fore.CYAN}  Uploaded files in session '{session_id}':{Style.RESET_ALL}")
     for i, f in enumerate(files, 1):
         exists = "✔" if os.path.exists(f["filepath"]) else "✖ MISSING"
-        print(f"  [{i}] {Fore.WHITE}{f['filename']}{Style.RESET_ALL}  |  id: {f['file_id']}  |  {exists}")
+        print(f"  [{i}] {Fore.WHITE}{f['filename']}{Style.RESET_ALL}"
+              f"  |  id: {f['file_id']}  |  {exists}")
     print()
 
 
 def cmd_clear(session_id: str, get_files_fn, clear_session_fn) -> None:
-    """Handle /clear — delete uploaded files from disk and wipe session state."""
+    """Handle /clear — delete uploaded files and wipe session state."""
     confirm = input(
-        f"  {Fore.RED}This will delete all files and history for this session. Confirm? (y/N): {Style.RESET_ALL}"
+        f"  {Fore.RED}This will delete all files and history for this session. "
+        f"Confirm? (y/N): {Style.RESET_ALL}"
     ).strip().lower()
     if confirm != "y":
         _print_status("Clear cancelled.")
@@ -342,14 +338,34 @@ def cmd_clear(session_id: str, get_files_fn, clear_session_fn) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SESSION NOTE INJECTION
+#
+# Mirrors what main.py does: when files are present, append a system note so
+# the agent knows the session_id and which files to pass to the document tools.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_message(user_input: str, session_id: str, get_files_fn) -> str:
+    """Append a system note containing session_id and file names when uploads exist."""
+    files = get_files_fn(session_id)
+    if not files:
+        return user_input
+    file_names = ", ".join(f["filename"] for f in files)
+    return (
+        f"{user_input}\n\n"
+        f"[System note: session_id='{session_id}'. "
+        f"Files uploaded in this session: {file_names}. "
+        f"Use parse_document_tool or search_documents_tool with this session_id to access them.]"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN LOOP
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _chat_loop():
-    # Import project modules
     (
         run_agent, append_message, get_history, add_file,
-        get_files, clear_session, parse_uploaded_file, settings
+        get_files, clear_session, settings
     ) = _import_project()
 
     _print_banner()
@@ -357,7 +373,8 @@ async def _chat_loop():
 
     session_id = f"cli_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     print(f"  Session ID : {Fore.YELLOW}{session_id}{Style.RESET_ALL}")
-    print(f"  Type {Fore.CYAN}/help{Style.RESET_ALL} for commands, {Fore.CYAN}/quit{Style.RESET_ALL} to exit.\n")
+    print(f"  Type {Fore.CYAN}/help{Style.RESET_ALL} for commands, "
+          f"{Fore.CYAN}/quit{Style.RESET_ALL} to exit.\n")
 
     while True:
         # ── Prompt ────────────────────────────────────────────────────────────
@@ -370,9 +387,9 @@ async def _chat_loop():
         if not user_input:
             continue
 
-        # ── Commands ──────────────────────────────────────────────────────────
         cmd = user_input.lower()
 
+        # ── Commands ──────────────────────────────────────────────────────────
         if cmd in ("/quit", "/exit", "/q"):
             print(f"\n{Fore.YELLOW}Goodbye!{Style.RESET_ALL}")
             break
@@ -394,13 +411,13 @@ async def _chat_loop():
 
         elif cmd == "/clear":
             cmd_clear(session_id, get_files, clear_session)
-            # After clear, re-use same session_id (store was wiped, ADK session still exists
-            # but will be re-created on the next agent call — harmless)
+            # Session store is wiped; the ADK in-memory session will be
+            # re-created automatically on the next agent call.
 
         elif cmd == "/new":
-            # Commit: clear current session first, then generate new ID
             confirm = input(
-                f"  {Fore.YELLOW}Start a new session? Current session will be cleared. (y/N): {Style.RESET_ALL}"
+                f"  {Fore.YELLOW}Start a new session? Current session will be cleared. "
+                f"(y/N): {Style.RESET_ALL}"
             ).strip().lower()
             if confirm == "y":
                 cmd_clear(session_id, get_files, clear_session)
@@ -412,18 +429,7 @@ async def _chat_loop():
 
         # ── Chat message → agent ──────────────────────────────────────────────
         else:
-            # Inject session_id so document tools can look up uploaded files
-            files = get_files(session_id)
-            message = user_input
-            if files:
-                file_names = ", ".join(f["filename"] for f in files)
-                message = (
-                    f"{user_input}\n\n"
-                    f"[System note: session_id='{session_id}'. "
-                    f"Files uploaded in this session: {file_names}. "
-                    f"Use tool_parse_document or tool_search_documents with this session_id to access them.]"
-                )
-
+            message = _build_message(user_input, session_id, get_files)
             append_message(session_id, "user", user_input)
             _print_status("Thinking…")
             try:
@@ -432,7 +438,10 @@ async def _chat_loop():
                 _print_agent_reply(result["text"], result.get("data"))
             except Exception as e:
                 _print_error(f"Agent error: {e}")
-                print(f"  {Fore.YELLOW}(Check your GEMINI_API_KEY in .env and your Gemini API quota at https://ai.dev/rate-limit){Style.RESET_ALL}\n")
+                print(
+                    f"  {Fore.YELLOW}Check your GEMINI_API_KEY in .env and your Gemini API quota "
+                    f"at https://ai.dev/rate-limit{Style.RESET_ALL}\n"
+                )
 
 
 def main():
