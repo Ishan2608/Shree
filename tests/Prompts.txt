@@ -1,0 +1,19 @@
+# Artha — Test Prompt Series
+# Run these in order in test_run.py for a full UX walkthrough.
+# Each prompt builds on the previous turn — tests memory, tool chaining, and all features.
+
+1. What is SWEAT equity? Also briefly explain PE ratio and what a good PE looks like for Indian IT stocks.
+
+2. Search for the latest news affecting the Indian oil and gas sector. Identify the top 3 companies most impacted and tell me their NSE ticker symbols.
+
+3. For those 3 companies, get me their current stock price, 52-week range, PE ratio, and analyst consensus. Present it as a comparison table.
+
+4. Now get me the last 3 months of daily price history for the most bullish of those 3 companies based on analyst consensus. Show me the chart data.
+
+5. Based on that company's price history and current fundamentals, forecast the next 10 trading days. What does the model say?
+
+6. Get me the income statement and cashflow data for that same company. Annual. Summarise the revenue and profit trend in plain English.
+
+7. What is the current USD to INR exchange rate? Also find the latest RBI monetary policy stance and tell me how it might affect the stock we have been analysing.
+
+8. Based on everything discussed in this conversation — the news, fundamentals, financials, forecast, and macro context — give me a final investment opinion on this stock. Structure it as a proper report with risks and a clear verdict.

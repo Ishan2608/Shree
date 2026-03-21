@@ -1,19 +1,24 @@
 """
 main.py — FastAPI Application
 
-All HTTP routes for the Shree_v2 backend.
+All HTTP routes for the Artha backend.
 Entry point for uvicorn: `uvicorn main:app --reload`
 
 Routes
 ------
-POST   /chat                    -> Send a message to the agent
-POST   /upload?session_id=...   -> Upload a file (PDF, DOCX, Excel, CSV, TXT, PPT)
-POST   /context                 -> Inject raw text context into a session
-DELETE /session/{session_id}    -> Delete a session and all its uploaded files
+POST   /chat                       -> Send a message to the agent
+POST   /upload?session_id=...      -> Upload a file (PDF, DOCX, Excel, CSV, TXT, PPT)
+POST   /context                    -> Inject raw text context into a session
+DELETE /session/{session_id}       -> Delete a session and all its uploaded files
 GET    /session/{session_id}/files -> List files uploaded in a session
-GET    /health                  -> Health check
+GET    /health                     -> Health check
 
-Swagger UI: http://localhost:8000/docs
+Memory contract:
+  run_agent() reads session history BEFORE the current message is appended.
+  This route stores the ENRICHED message (with session_id note) in history so
+  that on follow-up turns, document tools still receive the session_id hint.
+  Both the enriched user message and the assistant reply are appended AFTER
+  run_agent() returns — never before.
 """
 
 import os
@@ -42,22 +47,25 @@ from agent import run_agent
 app = FastAPI(
     title="Artha Backend",
     description=(
-        "AI Financial Analyst Agent API for Indian retail investors. "
-        "Powered by Google ADK + Gemini 2.0 Flash."
+        "AI Financial Analyst API for Indian retail investors. "
+        "Powered by LangGraph + Groq (Llama 3.3 70B) + direct tool binding."
     ),
     version="1.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # Tighten to specific frontend origin in production
+    allow_origins=["*"],        # tighten to specific origin in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Supported upload extensions — validated on upload
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".ppt", ".pptx"}
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".docx", ".doc",
+    ".xlsx", ".xls", ".csv",
+    ".txt", ".ppt", ".pptx",
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,34 +78,46 @@ async def chat(request: ChatRequest):
     Main conversational endpoint.
 
     Flow:
-    1. Append the user message to session history.
-    2. Run the ADK agent (may call multiple MCP tools internally).
-    3. Append the agent reply to session history.
-    4. Return structured response: text for the chat bubble + optional data block
-       for the frontend chart renderer.
+      1. Build the enriched message: append session_id + file hints if files exist.
+         This enriched form is what gets stored in history so follow-up turns
+         still carry the session_id context for document tools.
+      2. Call run_agent() — reads history, runs tools, returns text + optional data.
+      3. Append ENRICHED user message to history (not the raw message).
+      4. Append the assistant reply to history.
+      5. Return ChatResponse.
 
-    The 'data' field is None for plain conversational replies and populated with
-    chart-ready JSON for stock analysis / forecast responses.
+    The 'data' field is None for plain text replies and populated with chart-ready
+    JSON when the agent includes a ```data ...``` block in its response.
     """
-    append_message(request.session_id, "user", request.message)
+    files   = get_files(request.session_id)
 
-    # Inject session_id so document tools can look up uploaded files
-    files = get_files(request.session_id)
-    message = request.message
+    # Always embed session_id so document tools can locate uploads on any turn.
     if files:
         file_names = ", ".join(f["filename"] for f in files)
-        message = (
+        enriched_message = (
             f"{request.message}\n\n"
             f"[System note: session_id='{request.session_id}'. "
             f"Files uploaded in this session: {file_names}. "
-            f"Use tool_parse_document or tool_search_documents with this session_id to access them.]"
+            f"Use parse_document_tool(session_id) or "
+            f"search_documents_tool(session_id, query) to access them.]"
+        )
+    else:
+        # Still embed session_id even with no files — keeps history consistent
+        # and allows tools to give a clean 'no files uploaded' message.
+        enriched_message = (
+            f"{request.message}\n\n"
+            f"[System note: session_id='{request.session_id}'. "
+            f"No files uploaded in this session yet.]"
         )
 
     try:
-        result = await run_agent(request.session_id, message)
+        result = await run_agent(request.session_id, enriched_message)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
 
+    # Store the ENRICHED message so subsequent turns retain the session_id note.
+    # The frontend only ever sends/receives request.message (clean) and result["text"].
+    append_message(request.session_id, "user",      enriched_message)
     append_message(request.session_id, "assistant", result["text"])
 
     return ChatResponse(
@@ -115,12 +135,9 @@ async def upload_file(
     """
     File upload endpoint.
 
-    Saves the uploaded file to the uploads/ directory with a UUID prefix to prevent
-    filename collisions across sessions. Registers the file in the session store so
-    the agent can access it later via tool_parse_document or tool_search_documents.
-
-    Supported file types: PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PPT, PPTX.
-    Returns the file_id which the user (and the agent) use to reference this file.
+    Saves the file to the uploads/ directory with a UUID prefix to avoid collisions.
+    Registers the file in session_store so document tools can access it.
+    Supported: PDF, DOCX, DOC, XLSX, XLS, CSV, TXT, PPT, PPTX.
     """
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -132,9 +149,9 @@ async def upload_file(
             ),
         )
 
-    file_id = str(uuid.uuid4())
-    safe_name = file_id + "_" + (file.filename or "upload")
-    dest = os.path.join(settings.UPLOAD_DIR, safe_name)
+    file_id   = str(uuid.uuid4())
+    safe_name = f"{file_id}_{file.filename or 'upload'}"
+    dest      = os.path.join(settings.UPLOAD_DIR, safe_name)
 
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     with open(dest, "wb") as out:
@@ -157,17 +174,14 @@ async def add_text_context(request: ContextRequest):
     """
     Text context injection endpoint.
 
-    Lets the user paste raw text into the session — a company description, a news
-    excerpt, personal research notes, or any context they want the agent to consider.
-    Stored as a system message in session history so the agent sees it on the next turn.
-
-    Returns the character count so the frontend can warn if the context is very large
-    (large contexts slow the agent down and may truncate older history).
+    Stores raw text as a 'system' role message in session history.
+    agent.py folds 'system' messages into labelled HumanMessages so Groq/Llama
+    sees the context correctly despite not supporting multiple SystemMessages.
     """
     content = f"[User-provided context]:\n{request.context}"
     append_message(request.session_id, "system", content)
     return {
-        "message": "Context added to your session.",
+        "message":    "Context added to your session.",
         "char_count": len(request.context),
     }
 
@@ -177,14 +191,11 @@ async def delete_session(session_id: str):
     """
     Session cleanup endpoint.
 
-    Deletes all uploaded files for this session from disk, then clears the session
-    from the in-memory store. File deletion MUST happen before clearing the session
-    because we need the file list from the session to know what to delete.
-
-    Call this when the user explicitly resets or when the frontend detects a new
-    conversation should start from scratch.
+    Deletes all uploaded files from disk, then clears the session from the
+    in-memory store. File deletion happens first because clear_session() removes
+    the file list — we'd lose track of what to delete if order were reversed.
     """
-    files = get_files(session_id)
+    files         = get_files(session_id)
     deleted_count = 0
     for f in files:
         if os.path.exists(f["filepath"]):
@@ -204,11 +215,8 @@ async def delete_session(session_id: str):
 @app.get("/session/{session_id}/files")
 async def list_session_files(session_id: str):
     """
-    List files uploaded in a session.
-
-    Returns file_id and filename for each file. Does NOT expose filepaths —
-    those are internal server details. Used by the frontend to show the user
-    which documents are available for the agent to reference.
+    List files registered for a session.
+    Does NOT expose filepaths — internal server detail.
     """
     files = get_files(session_id)
     return {
@@ -223,8 +231,4 @@ async def list_session_files(session_id: str):
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint. Returns 200 OK with version info.
-    Used by deployment monitors and the test_run.py startup check.
-    """
-    return {"status": "ok", "version": "1.0.0", "agent": "shree_v2"}
+    return {"status": "ok", "version": "1.0.0", "agent": "artha"}

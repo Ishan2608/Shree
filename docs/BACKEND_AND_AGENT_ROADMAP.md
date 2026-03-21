@@ -63,7 +63,7 @@ artha_backend/
 │   ├── __init__.py
 │   └── schemas.py           # Pydantic request/response models for FastAPI.
 │
-├── tools/                   # Plain Python functions. No framework dependency.
+├── tests/                   # Plain Python functions. No framework dependency.
 │   ├── logs
 │   ├── files
 │   └── scripts.py

@@ -4,6 +4,7 @@ test_run.py — Artha Terminal Chat Client
 Run from the project root:
     python tests/scripts/test_run.py
 
+Gives the same conversational experience as a frontend would.
 Every session is saved to tests/logs/session_YYYYMMDD_HHMMSS.md
 
 Commands
@@ -26,13 +27,15 @@ _HERE         = os.path.dirname(os.path.abspath(__file__))
 _TESTS_DIR    = os.path.dirname(_HERE)
 _PROJECT_ROOT = os.path.dirname(_TESTS_DIR)
 sys.path.insert(0, _PROJECT_ROOT)
-
 _LOGS_DIR = os.path.join(_TESTS_DIR, "logs")
 # ──────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import json
 import shutil
 import uuid
+import textwrap
+import re as _re
 from datetime import datetime
 
 # ── Colorama ──────────────────────────────────────────────────────────────────
@@ -42,159 +45,225 @@ try:
     _HAS_COLOR = True
 except ImportError:
     class Fore:
-        YELLOW = LIGHTYELLOW_EX = WHITE = LIGHTWHITE_EX = RED = CYAN = RESET = ""
+        CYAN=MAGENTA=WHITE=RED=GREEN=YELLOW=BLUE=LIGHTCYAN_EX=LIGHTMAGENTA_EX=\
+        LIGHTWHITE_EX=LIGHTYELLOW_EX=LIGHTGREEN_EX=LIGHTBLUE_EX=LIGHTRED_EX=\
+        BLACK=RESET=""
     class Back:
-        RESET = ""
+        CYAN=MAGENTA=RED=GREEN=BLUE=BLACK=LIGHTBLACK_EX=YELLOW=RESET=""
     class Style:
-        BRIGHT = DIM = RESET_ALL = NORMAL = ""
+        BRIGHT=DIM=RESET_ALL=NORMAL=""
     _HAS_COLOR = False
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-GOLD  = Style.BRIGHT + Fore.YELLOW   # bright gold  — headings, prompts, borders
-AMBER = Fore.YELLOW                  # softer amber — labels, secondary chrome
-DIM   = Style.DIM   + Fore.YELLOW    # dim gold     — hints, meta info
-WHITE = Style.BRIGHT + Fore.WHITE    # bright white — body / response text
-MUTED = Style.DIM   + Fore.WHITE     # dim white    — descriptions, padding
-ERR   = Style.BRIGHT + Fore.RED      # red          — errors only
+# ── Theme: Neon Dusk ─────────────────────────────────────────────────────────
+# Dark gray terminal. Light, comfortable, colorful.
+TEAL       = Style.BRIGHT + Fore.CYAN
+SOFT_TEAL  = Fore.CYAN
+DIM_TEAL   = Style.DIM   + Fore.CYAN
+LIME       = Style.BRIGHT + Fore.LIGHTGREEN_EX
+SOFT_LIME  = Fore.LIGHTGREEN_EX
+CORAL      = Style.BRIGHT + Fore.LIGHTYELLOW_EX
+SOFT_CORAL = Fore.LIGHTYELLOW_EX
+PINK       = Style.BRIGHT + Fore.LIGHTMAGENTA_EX
+SOFT_PINK  = Fore.MAGENTA
+WHITE      = Style.BRIGHT + Fore.WHITE
+MUTED      = Style.DIM   + Fore.WHITE
+ERR_FG     = Style.BRIGHT + Fore.LIGHTRED_EX
+
+# Badges
+BG_ARTHA   = Back.CYAN    + Style.BRIGHT + Fore.BLACK
+BG_USER    = Back.MAGENTA + Style.BRIGHT + Fore.WHITE
+BG_OK      = Back.GREEN   + Style.BRIGHT + Fore.BLACK
+BG_ERR     = Back.RED     + Style.BRIGHT + Fore.WHITE
+BG_INFO    = Back.BLACK   + Style.DIM    + Fore.CYAN
+BG_DATA    = Back.CYAN    + Style.BRIGHT + Fore.BLACK
+BG_CMD     = Back.MAGENTA + Style.BRIGHT + Fore.WHITE
+
 RESET = Style.RESET_ALL
+W     = 82  # terminal width — all layout derived from this
 
-W = 78  # terminal width
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Primitives ────────────────────────────────────────────────────────────────
 
 def _c(color: str, text: str) -> str:
     return f"{color}{text}{RESET}"
 
-def _puts(text: str = ""):
-    print(text)
+def _strip_ansi(s: str) -> str:
+    return _re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+def _vlen(s: str) -> int:
+    return len(_strip_ansi(s))
 
 def _blank():
     print()
 
-def _rule():
-    print(_c(DIM, "─" * W))
+def _thin():
+    print(_c(DIM_TEAL, "─" * W))
 
-def _strip_ansi(s: str) -> str:
-    import re
-    return re.sub(r"\x1b\[[0-9;]*m", "", s)
+def _thick():
+    print(_c(TEAL, "━" * W))
 
 
-# ── Box drawing ───────────────────────────────────────────────────────────────
+# ── Box ───────────────────────────────────────────────────────────────────────
 
-def _box(lines: list[str], title: str = ""):
-    inner = W - 2
+def _box(lines: list[str], title: str = "", color=None):
+    color  = color or SOFT_TEAL
+    inner  = W - 2
+    border = _c(color, "│")
     if title:
-        head = f"┌─ {title} " + "─" * (inner - len(title) - 4) + "┐"
+        t     = f"─ {title} "
+        head  = "┌" + t + "─" * max(0, inner - len(t)) + "┐"
     else:
-        head = "┌" + "─" * inner + "┐"
-    print(_c(AMBER, head))
+        head  = "┌" + "─" * inner + "┐"
+    print(_c(color, head))
     for line in lines:
-        visible = len(_strip_ansi(line))
-        pad     = max(0, inner - 2 - visible)
-        print(_c(AMBER, "│ ") + line + " " * pad + _c(AMBER, " │"))
-    print(_c(AMBER, "└" + "─" * inner + "┘"))
+        vis = _vlen(line)
+        pad = max(0, inner - 2 - vis)
+        print(border + " " + line + " " * pad + " " + border)
+    print(_c(color, "└" + "─" * inner + "┘"))
 
 
-# ── UI components ─────────────────────────────────────────────────────────────
+# ── Components ────────────────────────────────────────────────────────────────
 
 def _banner(session_id: str):
-    log_rel = os.path.join("tests", "logs", f"session_{session_id}.md")
+    log_rel = os.path.join("tests", "logs", f"session_{session_id[:20]}.md")
     _blank()
-    _box([
-        _c(GOLD,  "  ⬡  A R T H A"),
-        _c(MUTED, "  AI Financial Analyst"),
-        _c(MUTED, "  Indian markets · Stocks · Documents · Forecasts"),
-        "",
-        _c(AMBER, "  Session : ") + _c(WHITE, session_id),
-        _c(AMBER, "  Log     : ") + _c(MUTED, log_rel),
-    ])
+    _thick()
+    # Logo row
+    print(f"  {_c(BG_ARTHA, '  ⬡  ARTHA  ')}  {_c(WHITE, 'AI Financial Analyst')}  "
+          f"{_c(MUTED, '· Indian markets · Stocks · Forecasts · Docs')}")
+    _thin()
+    print(f"  {_c(CORAL, 'Session')}  {_c(SOFT_PINK, '·')}  {_c(WHITE, session_id)}")
+    print(f"  {_c(CORAL, 'Log    ')}  {_c(SOFT_PINK, '·')}  {_c(MUTED,  log_rel)}")
+    _thick()
     _blank()
 
 
 def _print_help():
     commands = [
-        ("/upload",  "Upload a file (picker or type path)"),
-        ("/context", "Inject raw text context"),
-        ("/files",   "List uploaded files this session"),
-        ("/clear",   "Reset session (files + history)"),
-        ("/new",     "Start a brand-new session"),
-        ("/session", "Show current session ID"),
-        ("/help",    "Show this help"),
-        ("/quit",    "Exit"),
+        ("/upload",   "Upload a file  (PDF · DOCX · XLSX · CSV · TXT · PPT)"),
+        ("/context",  "Inject plain-text context or instructions"),
+        ("/files",    "List uploaded files in this session"),
+        ("/clear",    "Clear session  (history + files)"),
+        ("/new",      "Start a brand-new session"),
+        ("/session",  "Show current session ID"),
+        ("/help",     "Show this help"),
+        ("/quit",     "Exit"),
     ]
-    lines = [
-        _c(GOLD, "  {:<12}".format(cmd)) + _c(MUTED, desc)
-        for cmd, desc in commands
-    ]
-    _box(lines, title="Commands")
+    lines = []
+    for cmd, desc in commands:
+        lines.append(
+            _c(BG_CMD, f" {cmd:<10}")
+            + "  "
+            + _c(MUTED, desc)
+        )
+    _box(lines, title="Commands", color=SOFT_PINK)
     _blank()
 
 
-def _prompt_user() -> str:
-    return input(_c(GOLD, "\n  ▶  ")).strip()
+def _prompt() -> str:
+    try:
+        return input(_c(CORAL, "\n  ▶  ")).strip()
+    except EOFError:
+        return "/quit"
 
 
 def _ok(msg: str):
-    print(_c(GOLD,  "  ✔  ") + _c(WHITE, msg))
+    print(f"  {_c(BG_OK, ' ✔ ')}  {_c(WHITE, msg)}")
 
 def _err(msg: str):
-    print(_c(ERR,   "  ✖  ") + _c(WHITE, msg))
+    print(f"  {_c(BG_ERR, ' ✖ ')}  {_c(ERR_FG, msg)}")
 
 def _info(msg: str):
-    print(_c(AMBER, "  ·  ") + _c(MUTED, msg))
+    print(f"  {_c(BG_INFO, ' · ')}  {_c(MUTED, msg)}")
 
 def _thinking():
-    print(_c(DIM, "\n  · · ·  thinking…\n"))
+    print(_c(DIM_TEAL, f"\n  {'· ' * 18}\n  Thinking…\n"))
 
 
-def _print_agent_reply(text: str, data: dict | None, logger: "SessionLogger"):
-    logger.log_agent(text, data)
-    import textwrap
+def _print_user(text: str):
     _blank()
-    header = "┌─ Artha " + "─" * (W - 9) + "┐"
-    footer = "└" + "─" * (W - 2) + "┘"
-    print(_c(GOLD, header))
-    for paragraph in text.split("\n"):
-        if not paragraph.strip():
-            pad = W - 2
-            print(_c(AMBER, "│") + " " * pad + _c(AMBER, "│"))
+    badge  = _c(BG_USER, "  You  ")
+    prefix = f"  {badge}  "
+    indent = " " * (_vlen(prefix))
+    for i, line in enumerate(textwrap.wrap(text, width=W - _vlen(prefix)) or [""]):
+        if i == 0:
+            print(prefix + _c(WHITE, line))
+        else:
+            print(indent + _c(WHITE, line))
+
+
+def _print_agent(text: str, data: dict | None, logger: "SessionLogger"):
+    logger.log_agent(text, data)
+    _blank()
+    # Header
+    header = _c(TEAL, "┌") + _c(TEAL, "─ ") + _c(BG_ARTHA, "  Artha  ") + \
+             _c(TEAL, " " + "─" * (W - 14) + "┐")
+    footer = _c(TEAL, "└" + "─" * (W - 2) + "┘")
+    b      = _c(TEAL, "│")
+    print(header)
+    for para in text.split("\n"):
+        if not para.strip():
+            print(b + " " * (W - 2) + b)
             continue
-        for line in textwrap.wrap(paragraph, width=W - 4) or [""]:
+        for line in textwrap.wrap(para, width=W - 4) or [""]:
             pad = W - 4 - len(line)
-            print(_c(AMBER, "│ ") + _c(WHITE, line) + " " * pad + _c(AMBER, " │"))
-    print(_c(GOLD, footer))
+            print(b + " " + _c(WHITE, line) + " " * pad + " " + b)
+    print(footer)
     if data:
         _blank()
-        _print_data_summary(data)
+        _print_data_card(data)
     _blank()
 
 
-def _print_data_summary(data: dict):
-    chart_type = data.get("chart_type", "unknown")
+def _print_data_card(data: dict):
+    ct   = data.get("chart_type", "unknown")
     rows: list[tuple[str, str]] = []
 
-    if chart_type == "candlestick":
+    if ct == "candlestick":
         dates  = data.get("dates",  [])
         closes = data.get("close",  [])
-        rows = [("Ticker", str(data.get("ticker", "n/a"))),
-                ("Candles", str(len(dates)))]
+        rows = [
+            ("Type",    "Candlestick Chart"),
+            ("Symbol",  str(data.get("symbol", "n/a"))),
+            ("Candles", str(len(dates))),
+        ]
         if dates:   rows.append(("Range",  f"{dates[0]}  →  {dates[-1]}"))
-        if closes:  rows.append(("Close",  f"first={closes[0]}  last={closes[-1]}"))
-    elif chart_type == "forecast":
+        if closes:  rows.append(("Close",  f"open={closes[0]}  close={closes[-1]}"))
+
+    elif ct == "forecast":
         med  = data.get("forecast_median",  [])
         hist = data.get("historical_dates", [])
-        rows = [("Symbol",  str(data.get("symbol", "n/a"))),
-                ("Horizon", f"{data.get('horizon_days', 'n/a')} days")]
-        if hist: rows.append(("Hist range", f"{hist[0]}  →  {hist[-1]}"))
-        if med:  rows.append(("Forecast",   f"first={med[0]}  last={med[-1]}"))
+        rows = [
+            ("Type",    "Forecast Chart"),
+            ("Symbol",  str(data.get("symbol", "n/a"))),
+            ("Horizon", f"{data.get('horizon_days', '?')} days"),
+        ]
+        if hist: rows.append(("Hist range",    f"{hist[0]}  →  {hist[-1]}"))
+        if med:  rows.append(("Forecast range", f"₹ {med[0]}  →  ₹ {med[-1]}"))
+
     else:
         rows = [(str(k), str(v)[:60]) for k, v in list(data.items())[:6]]
 
-    lines = [
-        _c(AMBER, "  {:<14}".format(k)) + _c(MUTED, v)
-        for k, v in rows
-    ]
-    _box(lines, title=f"Data · {chart_type.upper()}")
+    # Compact two-column card
+    W2     = W - 4
+    col1_w = min(max(len(r[0]) for r in rows) + 1, W2 // 3)
+    col2_w = W2 - col1_w - 3
+    seg1   = "─" * (col1_w + 2)
+    seg2   = "─" * (col2_w + 2)
+    mg     = "  "
+    b      = _c(SOFT_TEAL, "│")
+
+    title_txt = f"─ Chart Data · {ct.upper()} "
+    title_bar = mg + _c(TEAL, "┌" + title_txt + "─" * max(0, W2 - len(title_txt)) + "┐")
+    print(title_bar)
+    print(mg + _c(SOFT_TEAL, "┌" + seg1 + "┬" + seg2 + "┐"))
+    for i, (k, v) in enumerate(rows):
+        kc = f" {k[:col1_w]:<{col1_w}} "
+        vc = f" {str(v)[:col2_w]:<{col2_w}} "
+        print(mg + b + _c(CORAL, kc) + b + _c(WHITE, vc) + b)
+        if i < len(rows) - 1:
+            print(mg + _c(SOFT_TEAL, "├" + seg1 + "┼" + seg2 + "┤"))
+    print(mg + _c(SOFT_TEAL, "└" + seg1 + "┴" + seg2 + "┘"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,7 +273,8 @@ def _print_data_summary(data: dict):
 class SessionLogger:
     def __init__(self, session_id: str):
         os.makedirs(_LOGS_DIR, exist_ok=True)
-        self.path = os.path.join(_LOGS_DIR, f"session_{session_id}.md")
+        fname     = f"session_{session_id[:40]}.md"
+        self.path = os.path.join(_LOGS_DIR, fname)
         self._write(
             f"# Artha Session — {session_id}\n\n"
             f"**Started:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n"
@@ -220,10 +290,9 @@ class SessionLogger:
     def log_agent(self, text: str, data: dict | None = None):
         self._write(f"\n### 🤖 Artha\n{text}\n")
         if data:
-            import json
             self._write(
                 f"\n**Data block ({data.get('chart_type', 'unknown')}):**\n"
-                f"```json\n{json.dumps(data, indent=2)}\n```\n"
+                f"```json\n{json.dumps(data, indent=2, default=str)}\n```\n"
             )
 
     def log_event(self, event: str):
@@ -231,29 +300,26 @@ class SessionLogger:
 
     def close(self):
         self._write(f"\n---\n\n**Ended:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        _info(f"Session log saved → {os.path.relpath(self.path)}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LAZY PROJECT IMPORTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _import_project() -> tuple:
+def _import_project():
     try:
         from agent import run_agent
         from utils.session_store import (
-            append_message, get_history, add_file,
-            get_files, clear_session,
-        )
-        from utils.doc_parser import parse_uploaded_file
-        from config import settings
-        return (
-            run_agent, append_message, get_history,
+            append_message, get_history,
             add_file, get_files, clear_session,
-            parse_uploaded_file, settings,
         )
+        from config import settings
+        return run_agent, append_message, get_history, add_file, get_files, \
+               clear_session, settings
     except ImportError as e:
         _err(f"Import error: {e}")
-        _err("Make sure venv is active and .env exists with API keys.")
+        _err("Activate your venv and ensure .env has API keys.")
         sys.exit(1)
     except Exception as e:
         _err(f"Startup error: {e}")
@@ -268,18 +334,16 @@ def _pick_file_tkinter() -> str | None:
     try:
         import tkinter as tk
         from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
+        root = tk.Tk(); root.withdraw(); root.attributes("-topmost", True)
         path = filedialog.askopenfilename(
-            title="Select a file to upload to Artha",
+            title="Select a file for Artha",
             filetypes=[
-                ("Supported files", "*.pdf *.docx *.doc *.xlsx *.xls *.csv *.txt *.ppt *.pptx"),
+                ("Supported", "*.pdf *.docx *.doc *.xlsx *.xls *.csv *.txt *.ppt *.pptx"),
                 ("All files", "*.*"),
             ],
         )
         root.destroy()
-        return path if path else None
+        return path or None
     except Exception:
         return None
 
@@ -288,37 +352,36 @@ def _pick_file_tkinter() -> str | None:
 # COMMAND HANDLERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+ALLOWED_EXT = {".pdf",".docx",".doc",".xlsx",".xls",".csv",".txt",".ppt",".pptx"}
+
+
 def cmd_upload(session_id: str, add_file_fn, settings, logger: SessionLogger):
     _blank()
     _box([
-        _c(GOLD,  "  1") + _c(MUTED, "  Open file picker"),
-        _c(GOLD,  "  2") + _c(MUTED, "  Type path manually"),
-        _c(AMBER, "  0") + _c(MUTED, "  Cancel"),
-    ], title="Upload a file")
-    choice = input(_c(AMBER, "  Choice: ")).strip()
+        _c(CORAL, "  1") + "  " + _c(MUTED, "Open file picker  (GUI)"),
+        _c(CORAL, "  2") + "  " + _c(MUTED, "Type path manually"),
+        _c(MUTED, "  0") + "  " + _c(MUTED, "Cancel"),
+    ], title="Upload a File", color=SOFT_CORAL)
 
+    choice = input(_c(CORAL, "  Choice: ")).strip()
     filepath = None
+
     if choice == "1":
         _info("Opening file picker…")
         filepath = _pick_file_tkinter()
         if not filepath:
-            _info("No file selected.")
-            return
+            _info("No file selected."); return
     elif choice == "2":
-        filepath = input(_c(AMBER, "  Path: ")).strip().strip('"').strip("'")
+        filepath = input(_c(CORAL, "  Path: ")).strip().strip('"').strip("'")
     else:
-        _info("Cancelled.")
-        return
+        _info("Cancelled."); return
 
     if not filepath or not os.path.isfile(filepath):
-        _err(f"File not found: {filepath}")
-        return
+        _err(f"File not found: {filepath}"); return
 
-    ext     = os.path.splitext(filepath)[1].lower()
-    allowed = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".txt", ".ppt", ".pptx"}
-    if ext not in allowed:
-        _err(f"Unsupported type '{ext}'.")
-        return
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext not in ALLOWED_EXT:
+        _err(f"Unsupported type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXT))}"); return
 
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     file_id  = str(uuid.uuid4())
@@ -327,15 +390,17 @@ def cmd_upload(session_id: str, add_file_fn, settings, logger: SessionLogger):
     shutil.copy2(filepath, dest)
     add_file_fn(session_id, file_id, dest, filename)
 
-    _ok(f"Uploaded  '{filename}'")
-    _ok(f"File ID   {file_id}")
-    logger.log_event(f"File uploaded: {filename} (id={file_id})")
-    _info("You can now ask: 'What is my uploaded document about?'")
+    _ok(f"Uploaded   '{filename}'")
+    _ok(f"File ID    {file_id[:8]}…")
+    logger.log_event(f"File uploaded: {filename}  (id={file_id})")
+    _info("Try: 'Summarise my uploaded document' or 'What does section 3 say?'")
 
 
 def cmd_context(session_id: str, append_message_fn, logger: SessionLogger):
     _blank()
-    _info("Paste context below. Type END to finish, CANCEL to abort.")
+    _info("Paste your context below.")
+    _info("Type  END   on its own line to finish.")
+    _info("Type  CANCEL  to abort.")
     lines = []
     while True:
         try:
@@ -345,49 +410,45 @@ def cmd_context(session_id: str, append_message_fn, logger: SessionLogger):
         if line.strip().upper() == "END":
             break
         if line.strip().upper() == "CANCEL":
-            _info("Cancelled.")
-            return
+            _info("Cancelled."); return
         lines.append(line)
     if not lines:
-        _info("No context provided.")
-        return
+        _info("No context provided."); return
     text = "\n".join(lines)
     append_message_fn(session_id, "system", f"[User-provided context]:\n{text}")
     logger.log_event(f"Context injected ({len(text)} chars)")
-    _ok(f"Context added ({len(text)} characters).")
+    _ok(f"Context added  ({len(text):,} characters)")
 
 
 def cmd_files(session_id: str, get_files_fn):
     files = get_files_fn(session_id)
     if not files:
-        _info("No files uploaded yet.")
-        return
+        _info("No files uploaded yet."); return
     lines = []
     for i, f in enumerate(files, 1):
-        exists   = _c(GOLD, "✔") if os.path.exists(f["filepath"]) else _c(ERR, "✖ MISSING")
-        short_id = f["file_id"][:8] + "…"
+        exists = _c(LIME, "✔ on disk") if os.path.exists(f["filepath"]) else _c(ERR_FG, "✖ missing")
         lines.append(
-            _c(DIM,   f"  {i:<3}") +
-            _c(WHITE, f"{f['filename']:<32}") +
-            _c(MUTED, f"{short_id:<12}") +
-            exists
+            _c(MUTED,  f"  {i:<3}")
+            + _c(WHITE, f"{f['filename']:<34}")
+            + _c(MUTED, f"{f['file_id'][:8]}…  ")
+            + exists
         )
-    _box(lines, title="Uploaded Files")
+    _box(lines, title="Uploaded Files", color=SOFT_LIME)
 
 
 def cmd_clear(session_id: str, get_files_fn, clear_session_fn, logger: SessionLogger):
-    confirm = input(_c(AMBER, "  Delete all files and history? (y/N): ")).strip().lower()
+    confirm = input(_c(ERR_FG, "  Delete all history and files? (y/N): ")).strip().lower()
     if confirm != "y":
-        _info("Cancelled.")
-        return
+        _info("Cancelled."); return
     files   = get_files_fn(session_id)
-    deleted = sum(
-        1 for f in files
-        if os.path.exists(f["filepath"]) and not os.remove(f["filepath"])
-    )
+    deleted = 0
+    for f in files:
+        if os.path.exists(f["filepath"]):
+            os.remove(f["filepath"])
+            deleted += 1
     clear_session_fn(session_id)
     logger.log_event(f"Session cleared. {deleted} file(s) deleted.")
-    _ok(f"Session cleared. {deleted} file(s) deleted.")
+    _ok(f"Session cleared. {deleted} file(s) deleted from disk.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -396,8 +457,8 @@ def cmd_clear(session_id: str, get_files_fn, clear_session_fn, logger: SessionLo
 
 async def _chat_loop():
     (
-        run_agent, append_message, get_history, add_file,
-        get_files, clear_session, parse_uploaded_file, settings
+        run_agent, append_message, get_history,
+        add_file, get_files, clear_session, settings
     ) = _import_project()
 
     session_id = f"cli_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -406,77 +467,113 @@ async def _chat_loop():
     _banner(session_id)
     _print_help()
 
-    while True:
-        try:
-            user_input = _prompt_user()
-        except (KeyboardInterrupt, EOFError):
-            _blank()
-            _info("Goodbye.")
-            logger.close()
-            break
-
-        if not user_input:
-            continue
-
-        cmd = user_input.lower()
-
-        if cmd in ("/quit", "/exit", "/q"):
-            _info("Goodbye.")
-            logger.close()
-            break
-        elif cmd == "/help":
-            _print_help()
-        elif cmd == "/session":
-            _info(f"Session ID: {session_id}")
-        elif cmd == "/files":
-            cmd_files(session_id, get_files)
-        elif cmd == "/upload":
-            cmd_upload(session_id, add_file, settings, logger)
-        elif cmd == "/context":
-            cmd_context(session_id, append_message, logger)
-        elif cmd == "/clear":
-            cmd_clear(session_id, get_files, clear_session, logger)
-        elif cmd == "/new":
-            confirm = input(_c(AMBER, "  Start new session? (y/N): ")).strip().lower()
-            if confirm == "y":
-                cmd_clear(session_id, get_files, clear_session, logger)
-                logger.close()
-                session_id = f"cli_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                logger     = SessionLogger(session_id)
-                _ok(f"New session: {session_id}")
-        elif cmd.startswith("/"):
-            _err(f"Unknown command '{user_input}'. Type /help.")
-        else:
-            files   = get_files(session_id)
-            message = user_input
-            if files:
-                file_names = ", ".join(f["filename"] for f in files)
-                message = (
-                    f"{user_input}\n\n"
-                    f"[System note: session_id='{session_id}'. "
-                    f"Files in session: {file_names}. "
-                    f"Use parse_document_tool(session_id) or search_documents_tool(session_id, query).]"
-                )
-
-            logger.log_user(user_input)
-            append_message(session_id, "user", user_input)
-            _rule()
-            _thinking()
+    try:
+        while True:
             try:
-                result = await run_agent(session_id, message)
-                append_message(session_id, "assistant", result["text"])
-                _print_agent_reply(result["text"], result.get("data"), logger)
-            except Exception as e:
-                _err(f"Agent error: {e}")
-                logger.log_event(f"ERROR: {e}")
-            _rule()
+                user_input = _prompt()
+            except KeyboardInterrupt:
+                _blank(); _info("Use /quit to exit gracefully."); continue
+
+            if not user_input:
+                continue
+
+            cmd = user_input.lower()
+
+            # ── Commands ──────────────────────────────────────────────────────
+            if cmd in ("/quit", "/exit", "/q"):
+                _info("Goodbye.")
+                logger.close()
+                break
+
+            elif cmd == "/help":
+                _print_help()
+
+            elif cmd == "/session":
+                _info(f"Session ID : {session_id}")
+                _info(f"Log file   : {os.path.relpath(logger.path)}")
+
+            elif cmd == "/files":
+                cmd_files(session_id, get_files)
+
+            elif cmd == "/upload":
+                cmd_upload(session_id, add_file, settings, logger)
+
+            elif cmd == "/context":
+                cmd_context(session_id, append_message, logger)
+
+            elif cmd == "/clear":
+                cmd_clear(session_id, get_files, clear_session, logger)
+
+            elif cmd == "/new":
+                confirm = input(_c(ERR_FG, "  Start a new session? (y/N): ")).strip().lower()
+                if confirm == "y":
+                    cmd_clear(session_id, get_files, clear_session, logger)
+                    logger.close()
+                    session_id = f"cli_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    logger     = SessionLogger(session_id)
+                    _blank()
+                    _ok(f"New session started: {session_id}")
+                    _info(f"Log → {os.path.relpath(logger.path)}")
+
+            elif cmd.startswith("/"):
+                _err(f"Unknown command '{user_input}'. Type /help.")
+
+            # ── Agent turn ────────────────────────────────────────────────────
+            else:
+                files = get_files(session_id)
+
+                # Build the enriched message that carries session_id to doc tools.
+                # This same enriched form is stored in history so follow-up turns
+                # retain the session context without the user having to repeat it.
+                if files:
+                    file_names = ", ".join(f["filename"] for f in files)
+                    enriched = (
+                        f"{user_input}\n\n"
+                        f"[System note: session_id='{session_id}'. "
+                        f"Files in session: {file_names}. "
+                        f"Use parse_document_tool(session_id) or "
+                        f"search_documents_tool(session_id, query).]"
+                    )
+                else:
+                    enriched = (
+                        f"{user_input}\n\n"
+                        f"[System note: session_id='{session_id}'. No files uploaded yet.]"
+                    )
+
+                logger.log_user(user_input)
+                _print_user(user_input)
+                _thin()
+                _thinking()
+
+                try:
+                    result = await run_agent(session_id, enriched)
+
+                    # Append ENRICHED message to history (not the raw input).
+                    # This ensures session_id context persists on follow-up turns
+                    # about the same documents without the user repeating themselves.
+                    append_message(session_id, "user",      enriched)
+                    append_message(session_id, "assistant", result["text"])
+
+                    _print_agent(result["text"], result.get("data"), logger)
+
+                except Exception as e:
+                    _err(f"Agent error: {e}")
+                    logger.log_event(f"ERROR: {type(e).__name__}: {e}")
+
+                _thin()
+
+    except Exception as e:
+        _err(f"Unexpected crash: {e}")
+        logger.log_event(f"CRASH: {e}")
+    finally:
+        logger.close()
 
 
 def main():
     try:
         asyncio.run(_chat_loop())
     except KeyboardInterrupt:
-        print("\nInterrupted. Goodbye!")
+        print("\n  Interrupted. Goodbye!")
 
 
 if __name__ == "__main__":

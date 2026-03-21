@@ -5,6 +5,25 @@ Ask about stock prices, run full analyses, upload documents, and get price forec
 
 > **"Artha"** means wealth and purpose in Sanskrit.
 
+## Intended User Experience:
+1. User can ask a generic question to agent 
+> E.g., What is SWEAT Equity?
+2. User can ask it to retrieve news 
+> Find latest news affecting Oil Industry in India and analyze it to derive 3 points of positive and negative impacts.
+3. User can ask it to fetch data from internet.
+> Get exchange rate of INR and USD.
+4. User can ask it to get historical stock data and provide analyes.
+> E.g., Get Past 3 month data of TCS.
+> E.g., Get Past 10 years data for Wipro, but for each year, only for August Month.
+5. User can ask it to make predictions and make reports.
+> E.g., Based on news data collected from above, make prediction for Oil Companies.
+6. User can upload his own files. Or add text in context as additional detail or instructions.
+> E.g., Analyse my Excel file and give professional opinion of in good and bad pointers.
+
+The user talks to it normally. Agent decides based on each prompt which tools to use. 
+It maintains the memory of the conversation. 
+At once, agent can use multiple tools if needed. i.e., in sequential or in parallel or in mixed format as needed per user request. 
+For example, user might ask it to assess latest news in the market to get names of top 5 industries to be impacted in India, their top companies, an analyses of those top companies and then predictions. Each function requires data in specific format. The model should be able to follow that consistency. 
 
 ## Stack
 
