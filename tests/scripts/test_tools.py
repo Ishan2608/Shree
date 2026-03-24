@@ -16,8 +16,8 @@ import re as _re
 from datetime import datetime
 
 # ── Path bootstrap ─────────────────────────────────────────────────────────────
-_HERE         = os.path.dirname(os.path.abspath(__file__))
-_TESTS_DIR    = os.path.dirname(_HERE)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_TESTS_DIR = os.path.dirname(_HERE)
 _PROJECT_ROOT = os.path.dirname(_TESTS_DIR)
 sys.path.insert(0, _PROJECT_ROOT)
 _LOGS_DIR = os.path.join(_TESTS_DIR, "logs")
@@ -231,7 +231,10 @@ def test_session_store():
     from utils.session_store import append_message, get_history, clear_session, add_file, get_files
 
     sid = "artha_test_session"
-    clear_session(sid)
+    try:
+        clear_session(sid)          # session may not exist yet — that's fine
+    except KeyError:
+        pass
 
     # Messages
     append_message(sid, "user",      "Analyse HDFC Bank for me.")
@@ -702,14 +705,15 @@ if __name__ == "__main__":
     for fn in tests:
         try:
             fn()
+            _pass(fn.__name__)
+            _LOG.log_result(fn.__name__, True)
             passed += 1
         except AssertionError as e:
             _fail(fn.__name__, str(e))
             _LOG.log_result(fn.__name__, False, f"AssertionError: {e}")
             failed += 1
         except Exception as e:
-            print(f"  {_c(BG_FAIL, ' ERROR ')}  {_c(ERR_FG, fn.__name__)}  "
-                  f"{_c(MUTED, f'{type(e).__name__}: {e}')}")
+            _fail(fn.__name__, f"{type(e).__name__}: {e}")
             _LOG.log_result(fn.__name__, False, f"{type(e).__name__}: {e}")
             failed += 1
 
