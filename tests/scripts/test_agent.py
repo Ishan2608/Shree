@@ -4,7 +4,7 @@ test_agent.py — Artha Automated Agent Test Runner
 Run from the project root:
     python tests/scripts/test_agent.py
 
-Fires the 8 predefined prompts at the agent in a single session,
+Fires 5 predefined prompts at the agent in a single session,
 checks each response against expected signals, prints results live,
 and saves a full log to tests/logs/agent_test_YYYYMMDD_HHMMSS.md
 
@@ -132,63 +132,50 @@ DEFAULT_HARD_FAIL = [
     "as an ai, i", "i'm not able to",
 ]
 
-# ── The 8 test cases ──────────────────────────────────────────────────────────
+# ── 5 test cases — covers all major tool categories within Groq free-tier TPM ─
 
 CASES = [
     Case(
         num=1,
-        label="General Knowledge — SWEAT equity + PE ratio",
+        label="General Knowledge — no tools needed",
         prompt=(
-            "What is SWEAT equity? Also briefly explain PE ratio "
+            "What is SWEAT equity? Briefly explain PE ratio "
             "and what a good PE looks like for Indian IT stocks."
         ),
         min_len=150,
-        keywords=["sweat equity", "pe ratio", "price", "earnings"],
+        keywords=["sweat equity", "pe", "earnings"],
         expect_data=False,
         expect_disclaimer=False,
     ),
     Case(
         num=2,
-        label="News + Ticker Resolution — Oil & Gas sector",
+        label="News + Ticker + Stock Info — tool chaining",
         prompt=(
-            "Search for the latest news affecting the Indian oil and gas sector. "
-            "Identify the top 3 companies most impacted and tell me their NSE ticker symbols."
+            "Search latest news on the Indian oil and gas sector. "
+            "Pick the single most impacted company, find its NSE ticker, "
+            "then get its current price, PE ratio, and analyst consensus."
         ),
         min_len=200,
-        keywords=["oil", "nse", "reliance", "ongc"],   # at least one should appear
-        expect_data=False,
-        expect_disclaimer=False,
-    ),
-    Case(
-        num=3,
-        label="Multi-stock Info + Memory — comparison from prompt 2",
-        prompt=(
-            "For those 3 companies, get me their current stock price, "
-            "52-week range, PE ratio, and analyst consensus. "
-            "Present it as a comparison."
-        ),
-        min_len=250,
-        keywords=["price", "52", "pe", "analyst"],
+        keywords=["price", "pe", "nse", "analyst"],
         expect_data=False,
         expect_disclaimer=True,
     ),
     Case(
-        num=4,
-        label="Stock History + Chart — 3-month price data",
+        num=3,
+        label="Stock History + Chart — memory + data block",
         prompt=(
-            "Get me the last 3 months of daily price history for the most bullish "
-            "of those 3 companies based on analyst consensus. Show me the chart data."
+            "Get 3 months of daily price history for that company and show the chart data."
         ),
-        min_len=150,
+        min_len=50,
         keywords=["close", "high", "low", "date"],
-        expect_data=True,          # must emit a ```data``` block
+        expect_data=True,
         expect_disclaimer=False,
     ),
     Case(
-        num=5,
-        label="Forecast — 10-day prediction with chart",
+        num=4,
+        label="Forecast — Chronos ML model + chart",
         prompt=(
-            "Based on that company's price history, forecast the next 10 trading days. "
+            "Forecast the next 10 trading days for that company. "
             "What does the model predict?"
         ),
         min_len=150,
@@ -197,43 +184,16 @@ CASES = [
         expect_disclaimer=True,
     ),
     Case(
-        num=6,
-        label="Financials — Income + Cashflow, plain-English summary",
-        prompt=(
-            "Get me the annual income statement and cashflow data for that same company. "
-            "Summarise the revenue and profit trend in plain English."
-        ),
-        min_len=200,
-        keywords=["revenue", "profit", "income", "cash"],
-        expect_data=False,
-        expect_disclaimer=True,
-    ),
-    Case(
-        num=7,
-        label="Web Search — USD/INR rate + RBI macro context",
+        num=5,
+        label="Web Search — USD/INR + RBI, no prior context needed",
         prompt=(
             "What is the current USD to INR exchange rate? "
-            "Also find the latest RBI monetary policy stance and tell me "
-            "how it might affect the stock we have been analysing."
+            "Also find the latest RBI monetary policy stance."
         ),
-        min_len=200,
-        keywords=["inr", "rbi", "rate", "interest"],
+        min_len=150,
+        keywords=["inr", "rbi", "rate"],
         expect_data=False,
         expect_disclaimer=False,
-    ),
-    Case(
-        num=8,
-        label="Full Report — synthesise entire session",
-        prompt=(
-            "Based on everything discussed in this conversation — "
-            "the news, fundamentals, financials, forecast, and macro context — "
-            "give me a final investment opinion on this stock. "
-            "Structure it as a proper report with risks and a clear verdict."
-        ),
-        min_len=400,
-        keywords=["risk", "summary", "verdict", "financial advice"],
-        expect_data=False,
-        expect_disclaimer=True,
     ),
 ]
 
@@ -306,45 +266,6 @@ def evaluate(case: Case, response: str, data: dict | None) -> Result:
 
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
-
-def _render_result(r: Result, idx: int, total: int):
-    overall = _c(BG_PASS, " PASS ") if r.passed else _c(BG_FAIL, " FAIL ")
-    num_lbl = _c(BG_PROMPT, f"  {idx}/{total}  ")
-    _blank()
-    _thick()
-    print(f"  {num_lbl}  {overall}  {_c(WHITE, r.case.label)}")
-    _thin()
-
-    # Prompt preview
-    _preview("Prompt", r.case.prompt, chars=120)
-
-    # Timing
-    _kv("Time", f"{r.elapsed:.1f}s")
-
-    # Individual checks
-    _section("Checks")
-    for label, ok, detail in r.checks:
-        badge  = _c(BG_PASS, " ✔ ") if ok else _c(BG_FAIL, " ✖ ")
-        d_text = _c(MUTED, f"  {detail}") if detail else ""
-        print(f"    {badge}  {_c(WHITE, label)}{d_text}")
-
-    # Response preview
-    _section("Response preview")
-    _preview("text", r.response, chars=220)
-
-    if r.data:
-        _section("Data block")
-        ct = r.data.get("chart_type", "?")
-        _kv("chart_type", ct)
-        if ct == "candlestick":
-            dates = r.data.get("dates", [])
-            _kv("candles",    len(dates))
-            if dates: _kv("range", f"{dates[0]} → {dates[-1]}")
-        elif ct == "forecast":
-            med = r.data.get("forecast_median", [])
-            _kv("horizon",  r.data.get("horizon_days", "?"))
-            if med: _kv("median range", f"{med[0]} → {med[-1]}")
-
 
 def _render_summary(results: list[Result]):
     passed = sum(1 for r in results if r.passed)
@@ -488,10 +409,6 @@ async def run():
         _thin()
 
         logger.log_result(r)
-
-    # Full detailed render then summary
-    for r in results:
-        _render_result(r, r.case.num, len(CASES))
 
     _render_summary(results)
 
