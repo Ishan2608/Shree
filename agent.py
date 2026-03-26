@@ -397,7 +397,7 @@ ALL_TOOLS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 _agent = None
-
+GEMINI_3 = "gemini-3.1-flash-lite-preview"
 
 def _build_agent():
     global _agent
@@ -410,7 +410,7 @@ def _build_agent():
     #     temperature=0.1,
     # )
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model=GEMINI_3,
         google_api_key=settings.GEMINI_API_KEY,
         temperature=0.1,
     )
@@ -459,11 +459,16 @@ async def run_agent(session_id: str, message: str) -> dict:
 
     messages.append(HumanMessage(content=message))
 
-    result     = await _agent.ainvoke({"messages": messages})
+    # result = await _agent.ainvoke({"messages": messages})
+    result = await _agent.ainvoke({"messages": messages})
     final_text = ""
     if result.get("messages"):
-        last       = result["messages"][-1]
-        final_text = last.content if hasattr(last, "content") else str(last)
+        last = result["messages"][-1]
+        content = getattr(last, "content", "")
+        if isinstance(content, list):
+            final_text = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+        else:
+            final_text = str(content)
 
     data       = _extract_data_block(final_text)
     clean_text = _strip_data_block(final_text)

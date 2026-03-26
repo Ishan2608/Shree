@@ -31,6 +31,17 @@ from langchain_core.tools import tool
 from utils.session_store import get_history
 
 # ─────────────────────────────────────────────────────────────────────────────
+# LLM MODELS
+# ─────────────────────────────────────────────────────────────────────────────
+
+GEMINI_3 = "gemini-3.1-flash-lite-preview"
+
+ORCHESTRATOR = "llama-3.3-70b-versatile"
+ORCHESTRATOR_2 = "gemma-3-27b-it"
+ANALYST = "gemini-3.1-flash-lite-preview"
+AGGREGATOR = "gemini-3.1-flash-lite-preview"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SPECIALIST SYSTEM PROMPTS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -308,8 +319,14 @@ def _build_agents():
         try:
             prompt = f"Context: {context}\nTask: {task}\n[session_id: {session_id}]"
             messages = [SystemMessage(content=STOCK_ANALYSIS_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-            res = await _analysis_agent.ainvoke({"messages": messages})
-            return res["messages"][-1].content
+            # res = await _analysis_agent.ainvoke({"messages": messages})
+            # return res["messages"][-1].content
+            result = await _stock_analysis_agent.ainvoke({"messages": messages}) # Or _stock_aggregator_agent
+            last = result["messages"][-1]
+            content = getattr(last, "content", "")
+            if isinstance(content, list):
+                return "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+            return str(content)
         except Exception as e:
             return f"Analysis Agent Error: {str(e)}"
 
@@ -323,8 +340,14 @@ def _build_agents():
         try:
             prompt = f"Context: {context}\nTask: {task}\n[session_id: {session_id}]"
             messages = [SystemMessage(content=STOCK_AGGREGATOR_SYSTEM_PROMPT), HumanMessage(content=prompt)]
-            res = await _aggregator_agent.ainvoke({"messages": messages})
-            return res["messages"][-1].content
+            # res = await _aggregator_agent.ainvoke({"messages": messages})
+            # return res["messages"][-1].content
+            result = await _stock_analysis_agent.ainvoke({"messages": messages}) # Or _stock_aggregator_agent
+            last = result["messages"][-1]
+            content = getattr(last, "content", "")
+            if isinstance(content, list):
+                return "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+            return str(content)
         except Exception as e:
             return f"Aggregator Agent Error: {str(e)}"
 
@@ -356,14 +379,19 @@ async def run_agent(session_id: str, message: str) -> dict:
 
     messages.append(HumanMessage(content=message))
 
+    # result = await _guide_agent.ainvoke({"messages": messages})
     result = await _guide_agent.ainvoke({"messages": messages})
-    final_output = ""
+    final_text = ""
     if result.get("messages"):
         last = result["messages"][-1]
-        final_output = last.content if hasattr(last, "content") else str(last)
+        content = getattr(last, "content", "")
+        if isinstance(content, list):
+            final_text = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+        else:
+            final_text = str(content)
 
-    data = _extract_data_block(final_output)
-    clean_text = _strip_data_block(final_output)
+    data = _extract_data_block(final_text)
+    clean_text = _strip_data_block(final_text)
 
     return {"text": clean_text, "data": data}
 
